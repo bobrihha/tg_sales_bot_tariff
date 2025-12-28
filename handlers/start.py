@@ -98,8 +98,9 @@ async def forward_message_to_admin(message: Message, state: FSMContext, bot: Bot
         f"📩 <b>НОВОЕ СООБЩЕНИЕ</b>\n\n"
         f"<b>От:</b> {user.full_name}\n"
         f"<b>Username:</b> {username}\n"
-        f"<b>ID:</b> {user.id}\n\n"
-        f"<b>Сообщение:</b>\n{message.text}"
+        f"<b>ID:</b> <code>{user.id}</code>\n\n"
+        f"<b>Сообщение:</b>\n{message.text}\n\n"
+        f"<i>Ответьте на это сообщение (reply), чтобы отправить ответ пользователю.</i>"
     )
     
     # Отправляем всем админам
@@ -130,6 +131,45 @@ async def forward_message_to_admin(message: Message, state: FSMContext, bot: Bot
             reply_markup=main_menu_kb(),
             parse_mode="HTML"
         )
+
+
+@router.message(F.reply_to_message)
+async def admin_reply_to_user(message: Message, bot: Bot):
+    """Обработка ответа админа на сообщение пользователя"""
+    # Проверяем, что это админ
+    if message.from_user.id not in config.bot.admin_ids:
+        return
+    
+    # Проверяем, что это ответ на сообщение бота
+    if not message.reply_to_message or not message.reply_to_message.text:
+        return
+    
+    original_text = message.reply_to_message.text
+    
+    # Извлекаем ID пользователя из оригинального сообщения
+    if "ID:" not in original_text:
+        return
+    
+    try:
+        # Ищем ID в формате "ID: 123456789" или "ID:</b> 123456789"
+        import re
+        match = re.search(r'ID:[^\d]*(\d+)', original_text)
+        if not match:
+            return
+        
+        user_id = int(match.group(1))
+        
+        # Отправляем ответ пользователю
+        await bot.send_message(
+            chat_id=user_id,
+            text=f"📨 <b>Ответ от поддержки:</b>\n\n{message.text}",
+            parse_mode="HTML"
+        )
+        
+        await message.answer("✅ Ответ отправлен пользователю!")
+        
+    except Exception as e:
+        await message.answer(f"❌ Ошибка отправки: {e}")
 
 
 @router.callback_query(F.data == "main_menu")
