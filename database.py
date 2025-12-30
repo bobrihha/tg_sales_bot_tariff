@@ -55,9 +55,27 @@ async def init_db():
                 passport_photo_1 TEXT NOT NULL,
                 passport_photo_2 TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending',
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                payment_receipt TEXT,
+                payment_method_name TEXT,
+                payment_confirmed_at TEXT
             )
         """)
+        
+        # Миграция: добавляем новые колонки если их нет
+        try:
+            await db.execute("ALTER TABLE orders ADD COLUMN payment_receipt TEXT")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE orders ADD COLUMN payment_method_name TEXT")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE orders ADD COLUMN payment_confirmed_at TEXT")
+        except Exception:
+            pass
+        
         await db.commit()
 
 
@@ -147,3 +165,47 @@ async def get_all_orders(limit: int = 100) -> List[dict]:
         )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+
+
+async def update_order_receipt(
+    order_id: int,
+    receipt_file_id: str,
+    payment_method_name: str,
+) -> bool:
+    """Сохранить чек оплаты"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """UPDATE orders 
+               SET payment_receipt = ?, payment_method_name = ?, status = 'awaiting_confirmation'
+               WHERE order_id = ?""",
+            (receipt_file_id, payment_method_name, order_id)
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def confirm_order_payment(order_id: int) -> bool:
+    """Подтвердить оплату заказа"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """UPDATE orders 
+               SET status = 'paid', payment_confirmed_at = datetime('now')
+               WHERE order_id = ?""",
+            (order_id,)
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def reject_order_payment(order_id: int) -> bool:
+    """Отклонить оплату заказа"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """UPDATE orders 
+               SET status = 'payment_rejected', payment_receipt = NULL
+               WHERE order_id = ?""",
+            (order_id,)
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+

@@ -4,7 +4,7 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
-from data.tariffs import get_all_operators, get_tariffs_by_operator
+from data.tariffs import get_all_operators, get_tariffs_by_operator, PaymentMethod
 
 
 def main_menu_kb() -> ReplyKeyboardMarkup:
@@ -178,3 +178,61 @@ def cancel_kb() -> InlineKeyboardMarkup:
         )
     )
     return builder.as_markup()
+
+
+# ============== Direct Payment Keyboards ==============
+
+def payment_methods_kb(methods: list[PaymentMethod], tariff_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура выбора банка для оплаты"""
+    builder = InlineKeyboardBuilder()
+    for method in methods:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"🏦 {method.name}",
+                callback_data=f"select_payment:{method.id}:{tariff_id}"
+            )
+        )
+    builder.row(
+        InlineKeyboardButton(
+            text="❌ Отменить",
+            callback_data="cancel_order"
+        )
+    )
+    return builder.as_markup()
+
+
+def payment_details_kb(order_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура после показа реквизитов: Я оплатил / Отмена"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="✅ Я оплатил",
+            callback_data=f"i_paid:{order_id}"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="❌ Отменить",
+            callback_data="cancel_order"
+        )
+    )
+    return builder.as_markup()
+
+
+def admin_confirm_payment_kb(order_id: int, user_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура для админа: Подтвердить оплату"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="✅ Подтвердить оплату",
+            callback_data=f"confirm_payment:{order_id}:{user_id}"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="❌ Отклонить",
+            callback_data=f"reject_payment:{order_id}:{user_id}"
+        )
+    )
+    return builder.as_markup()
+

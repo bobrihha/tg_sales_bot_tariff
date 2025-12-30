@@ -4,7 +4,7 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from data.tariffs import Operator, Tariff
+from data.tariffs import Operator, Tariff, PaymentMethod
 
 
 def admin_main_kb() -> InlineKeyboardMarkup:
@@ -15,6 +15,9 @@ def admin_main_kb() -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(text="📦 Тарифы", callback_data="admin:tariffs")
+    )
+    builder.row(
+        InlineKeyboardButton(text="💳 Способы оплаты", callback_data="admin:payment_methods")
     )
     builder.row(
         InlineKeyboardButton(text="⬅️ Главное меню", callback_data="main_menu")
@@ -185,3 +188,87 @@ def admin_tariff_visibility_kb() -> InlineKeyboardMarkup:
         )
     )
     return builder.as_markup()
+
+
+# ============== Payment Methods Keyboards ==============
+
+def admin_payment_methods_kb(methods: list[PaymentMethod]) -> InlineKeyboardMarkup:
+    """Список способов оплаты"""
+    builder = InlineKeyboardBuilder()
+    for method in methods:
+        status = "✅" if method.is_active else "❌"
+        builder.row(
+            InlineKeyboardButton(
+                text=f"{status} {method.name}",
+                callback_data=f"admin:payment_method:{method.id}"
+            )
+        )
+    builder.row(
+        InlineKeyboardButton(
+            text="➕ Добавить способ оплаты",
+            callback_data="admin:payment_method_add"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(text="⬅️ Назад", callback_data="admin:back_main")
+    )
+    return builder.as_markup()
+
+
+def admin_payment_method_actions_kb(
+    method_id: int,
+    is_active: bool,
+) -> InlineKeyboardMarkup:
+    """Действия со способом оплаты"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="✏️ Редактировать",
+            callback_data=f"admin:payment_method_edit:{method_id}"
+        )
+    )
+    toggle_text = "❌ Отключить" if is_active else "✅ Включить"
+    builder.row(
+        InlineKeyboardButton(
+            text=toggle_text,
+            callback_data=f"admin:payment_method_toggle:{method_id}"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="🗑️ Удалить",
+            callback_data=f"admin:payment_method_delete:{method_id}"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="admin:payment_methods"
+        )
+    )
+    return builder.as_markup()
+
+
+def admin_payment_method_edit_kb(method_id: int) -> InlineKeyboardMarkup:
+    """Меню редактирования способа оплаты"""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="✏️ Название",
+            callback_data=f"admin:payment_method_edit_name:{method_id}"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="📝 Реквизиты",
+            callback_data=f"admin:payment_method_edit_details:{method_id}"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data=f"admin:payment_method:{method_id}"
+        )
+    )
+    return builder.as_markup()
+

@@ -33,6 +33,15 @@ class Tariff:
     is_public: bool
 
 
+@dataclass
+class PaymentMethod:
+    """Модель способа оплаты (банк/карта)"""
+    id: int
+    name: str           # Название банка
+    details: str        # Реквизиты (номер карты, ФИО и т.д.)
+    is_active: bool     # Активен ли способ оплаты
+
+
 _DEFAULT_OPERATORS = [
     {"id": 1, "name": "MTS"},
     {"id": 2, "name": "Megafon"},
@@ -44,8 +53,10 @@ _DEFAULT_OPERATORS = [
 _DEFAULT_STORE = {
     "operators": _DEFAULT_OPERATORS,
     "tariffs": [],
+    "payment_methods": [],
     "next_operator_id": 6,
     "next_tariff_id": 1,
+    "next_payment_method_id": 1,
 }
 
 
@@ -75,11 +86,17 @@ def _normalize_store(store: dict) -> dict:
     if "tariffs" not in store:
         store["tariffs"] = []
         changed = True
+    if "payment_methods" not in store:
+        store["payment_methods"] = []
+        changed = True
     if "next_operator_id" not in store:
         store["next_operator_id"] = _next_id(store.get("operators", []))
         changed = True
     if "next_tariff_id" not in store:
         store["next_tariff_id"] = _next_id(store.get("tariffs", []))
+        changed = True
+    if "next_payment_method_id" not in store:
+        store["next_payment_method_id"] = _next_id(store.get("payment_methods", []))
         changed = True
 
     if changed:
@@ -289,3 +306,108 @@ def format_tariff_info(tariff: Tariff, operator_name: Optional[str] = None) -> s
         lines.append(f"📅 Абонплата: <b>{tariff.monthly_fee:,} ₽/мес</b>")
     lines.append(f"💳 Стоимость подключения: <b>{tariff.connection_price:,} ₽</b>")
     return "\n".join(lines)
+
+
+# ============== PaymentMethod CRUD ==============
+
+def get_all_payment_methods() -> List[PaymentMethod]:
+    """Получить все способы оплаты"""
+    with _LOCK:
+        store = _load_store()
+        return [PaymentMethod(**pm) for pm in store.get("payment_methods", [])]
+
+
+def get_active_payment_methods() -> List[PaymentMethod]:
+    """Получить только активные способы оплаты"""
+    with _LOCK:
+        store = _load_store()
+        methods = []
+        for pm in store.get("payment_methods", []):
+            if pm.get("is_active", False):
+                methods.append(PaymentMethod(**pm))
+        return methods
+
+
+def get_payment_method_by_id(method_id: int) -> Optional[PaymentMethod]:
+    """Получить способ оплаты по ID"""
+    with _LOCK:
+        store = _load_store()
+        for pm in store.get("payment_methods", []):
+            if pm.get("id") == method_id:
+                return PaymentMethod(**pm)
+    return None
+
+
+def add_payment_method(name: str, details: str) -> PaymentMethod:
+    """Добавить способ оплаты"""
+    clean_name = name.strip()
+    if not clean_name:
+        raise ValueError("payment method name is empty")
+
+    with _LOCK:
+        store = _load_store()
+        payment_method = {
+            "id": store["next_payment_method_id"],
+            "name": clean_name,
+            "details": details.strip(),
+            "is_active": True,
+        }
+        store["next_payment_method_id"] += 1
+        store["payment_methods"].append(payment_method)
+        _save_store(store)
+        return PaymentMethod(**payment_method)
+
+
+def update_payment_method(
+    method_id: int,
+    *,
+    name: object = _UNSET,
+    details: object = _UNSET,
+) -> Optional[PaymentMethod]:
+    """Обновить способ оплаты"""
+    with _LOCK:
+        store = _load_store()
+        for pm in store.get("payment_methods", []):
+            if pm.get("id") != method_id:
+                continue
+
+            if name is not _UNSET:
+                clean_name = str(name).strip()
+                if not clean_name:
+                    raise ValueError("payment method name is empty")
+                pm["name"] = clean_name
+
+            if details is not _UNSET:
+                pm["details"] = str(details).strip()
+
+            _save_store(store)
+            return PaymentMethod(**pm)
+    return None
+
+
+def delete_payment_method(method_id: int) -> bool:
+    """Удалить способ оплаты"""
+    with _LOCK:
+        store = _load_store()
+        methods_before = len(store.get("payment_methods", []))
+        store["payment_methods"] = [
+            pm for pm in store.get("payment_methods", [])
+            if pm.get("id") != method_id
+        ]
+        if len(store["payment_methods"]) == methods_before:
+            return False
+        _save_store(store)
+        return True
+
+
+def toggle_payment_method(method_id: int) -> Optional[PaymentMethod]:
+    """Переключить активность способа оплаты"""
+    with _LOCK:
+        store = _load_store()
+        for pm in store.get("payment_methods", []):
+            if pm.get("id") == method_id:
+                pm["is_active"] = not pm.get("is_active", False)
+                _save_store(store)
+                return PaymentMethod(**pm)
+    return None
+

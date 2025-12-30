@@ -19,6 +19,13 @@ from data.tariffs import (
     get_tariffs_by_operator,
     toggle_tariff_visibility,
     update_tariff,
+    # Payment methods
+    get_all_payment_methods,
+    get_payment_method_by_id,
+    add_payment_method,
+    update_payment_method,
+    delete_payment_method,
+    toggle_payment_method,
 )
 from keyboards.admin_kb import (
     admin_main_kb,
@@ -29,6 +36,10 @@ from keyboards.admin_kb import (
     admin_tariff_actions_kb,
     admin_tariff_edit_kb,
     admin_tariff_visibility_kb,
+    # Payment methods
+    admin_payment_methods_kb,
+    admin_payment_method_actions_kb,
+    admin_payment_method_edit_kb,
 )
 
 router = Router()
@@ -46,6 +57,11 @@ class AdminStates(StatesGroup):
     editing_tariff_description = State()
     editing_tariff_monthly_fee = State()
     editing_tariff_connection_price = State()
+    # Payment methods
+    waiting_payment_method_name = State()
+    waiting_payment_method_details = State()
+    editing_payment_method_name = State()
+    editing_payment_method_details = State()
 
 
 def _is_admin(user_id: int) -> bool:
@@ -680,3 +696,295 @@ async def admin_tariff_delete(callback: CallbackQuery):
         parse_mode="HTML"
     )
     await callback.answer()
+
+
+# ============== Payment Methods Handlers ==============
+
+def _render_payment_method_text(method) -> str:
+    """Форматирование информации о способе оплаты"""
+    status = "✅ Активен" if method.is_active else "❌ Отключен"
+    return (
+        f"<b>💳 Способ оплаты:</b> {method.name}\n"
+        f"<b>Статус:</b> {status}\n\n"
+        f"<b>Реквизиты:</b>\n{method.details}"
+    )
+
+
+@router.callback_query(F.data == "admin:payment_methods")
+async def admin_show_payment_methods(callback: CallbackQuery, state: FSMContext):
+    """Список способов оплаты"""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    await state.clear()
+    methods = get_all_payment_methods()
+    await callback.message.edit_text(
+        "<b>💳 Способы оплаты</b>\n\nВыберите способ оплаты для настройки:",
+        reply_markup=admin_payment_methods_kb(methods),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin:payment_method_add")
+async def admin_add_payment_method(callback: CallbackQuery, state: FSMContext):
+    """Запрос названия нового способа оплаты"""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    await state.set_state(AdminStates.waiting_payment_method_name)
+    await callback.message.edit_text(
+        "Введите название способа оплаты (например: <b>Сбербанк</b> или <b>Тинькофф</b>):",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_payment_method_name)
+async def admin_save_payment_method_name(message: Message, state: FSMContext):
+    """Сохранение названия способа оплаты"""
+    if not _is_admin(message.from_user.id):
+        return
+
+    name = (message.text or "").strip()
+    if not name:
+        await message.answer("Название не может быть пустым.")
+        return
+
+    await state.update_data(payment_method_name=name)
+    await state.set_state(AdminStates.waiting_payment_method_details)
+
+    await message.answer(
+        "Введите реквизиты для оплаты.\n\n"
+        "Например:\n"
+        "<code>Карта: 1234 5678 9012 3456\n"
+        "Получатель: Иванов Иван Иванович\n"
+        "Банк: Сбербанк</code>",
+        parse_mode="HTML"
+    )
+
+
+@router.message(AdminStates.waiting_payment_method_details)
+async def admin_save_payment_method_details(message: Message, state: FSMContext):
+    """Сохранение реквизитов способа оплаты"""
+    if not _is_admin(message.from_user.id):
+        return
+
+    details = (message.text or "").strip()
+    if not details:
+        await message.answer("Реквизиты не могут быть пустыми.")
+        return
+
+    data = await state.get_data()
+    name = data.get("payment_method_name")
+    if not name:
+        await message.answer("Ошибка. Начните заново через /admin.")
+        await state.clear()
+        return
+
+    add_payment_method(name=name, details=details)
+    await state.clear()
+
+    methods = get_all_payment_methods()
+    await message.answer(
+        "✅ Способ оплаты добавлен.\n\n<b>💳 Способы оплаты</b>",
+        reply_markup=admin_payment_methods_kb(methods),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("admin:payment_method:"))
+async def admin_payment_method_details(callback: CallbackQuery):
+    """Детали способа оплаты"""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    method_id = int(callback.data.split(":")[2])
+    method = get_payment_method_by_id(method_id)
+    if not method:
+        await callback.answer("Способ оплаты не найден", show_alert=True)
+        return
+
+    text = _render_payment_method_text(method)
+    await callback.message.edit_text(
+        text,
+        reply_markup=admin_payment_method_actions_kb(method_id, method.is_active),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin:payment_method_toggle:"))
+async def admin_toggle_payment_method(callback: CallbackQuery):
+    """Переключить активность способа оплаты"""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    method_id = int(callback.data.split(":")[2])
+    method = toggle_payment_method(method_id)
+    if not method:
+        await callback.answer("Способ оплаты не найден", show_alert=True)
+        return
+
+    text = _render_payment_method_text(method)
+    await callback.message.edit_text(
+        text,
+        reply_markup=admin_payment_method_actions_kb(method_id, method.is_active),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin:payment_method_delete:"))
+async def admin_delete_payment_method(callback: CallbackQuery):
+    """Удалить способ оплаты"""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    method_id = int(callback.data.split(":")[2])
+    delete_payment_method(method_id)
+
+    methods = get_all_payment_methods()
+    await callback.message.edit_text(
+        "🗑️ Способ оплаты удалён.\n\n<b>💳 Способы оплаты</b>",
+        reply_markup=admin_payment_methods_kb(methods),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin:payment_method_edit:"))
+async def admin_payment_method_edit_menu(callback: CallbackQuery, state: FSMContext):
+    """Меню редактирования способа оплаты"""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    await state.clear()
+    method_id = int(callback.data.split(":")[2])
+    method = get_payment_method_by_id(method_id)
+    if not method:
+        await callback.answer("Способ оплаты не найден", show_alert=True)
+        return
+
+    text = _render_payment_method_text(method)
+    await callback.message.edit_text(
+        f"{text}\n\nВыберите, что изменить:",
+        reply_markup=admin_payment_method_edit_kb(method_id),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin:payment_method_edit_name:"))
+async def admin_payment_method_edit_name(callback: CallbackQuery, state: FSMContext):
+    """Редактирование названия способа оплаты"""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    method_id = int(callback.data.split(":")[2])
+    method = get_payment_method_by_id(method_id)
+    if not method:
+        await callback.answer("Способ оплаты не найден", show_alert=True)
+        return
+
+    await state.update_data(edit_payment_method_id=method_id)
+    await state.set_state(AdminStates.editing_payment_method_name)
+    await callback.message.edit_text(
+        f"Текущее название: <b>{method.name}</b>\n\nВведите новое название:",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.editing_payment_method_name)
+async def admin_apply_payment_method_name(message: Message, state: FSMContext):
+    """Сохранение нового названия"""
+    if not _is_admin(message.from_user.id):
+        return
+
+    name = (message.text or "").strip()
+    if not name:
+        await message.answer("Название не может быть пустым.")
+        return
+
+    data = await state.get_data()
+    method_id = data.get("edit_payment_method_id")
+    if not method_id:
+        await message.answer("Способ оплаты не найден. Откройте /admin заново.")
+        await state.clear()
+        return
+
+    method = update_payment_method(method_id, name=name)
+    if not method:
+        await message.answer("Способ оплаты не найден. Откройте /admin заново.")
+        await state.clear()
+        return
+
+    await state.clear()
+    await message.answer(
+        _render_payment_method_text(method),
+        reply_markup=admin_payment_method_actions_kb(method.id, method.is_active),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("admin:payment_method_edit_details:"))
+async def admin_payment_method_edit_details(callback: CallbackQuery, state: FSMContext):
+    """Редактирование реквизитов способа оплаты"""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    method_id = int(callback.data.split(":")[2])
+    method = get_payment_method_by_id(method_id)
+    if not method:
+        await callback.answer("Способ оплаты не найден", show_alert=True)
+        return
+
+    await state.update_data(edit_payment_method_id=method_id)
+    await state.set_state(AdminStates.editing_payment_method_details)
+    await callback.message.edit_text(
+        "Введите новые реквизиты:",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.editing_payment_method_details)
+async def admin_apply_payment_method_details(message: Message, state: FSMContext):
+    """Сохранение новых реквизитов"""
+    if not _is_admin(message.from_user.id):
+        return
+
+    details = (message.text or "").strip()
+    if not details:
+        await message.answer("Реквизиты не могут быть пустыми.")
+        return
+
+    data = await state.get_data()
+    method_id = data.get("edit_payment_method_id")
+    if not method_id:
+        await message.answer("Способ оплаты не найден. Откройте /admin заново.")
+        await state.clear()
+        return
+
+    method = update_payment_method(method_id, details=details)
+    if not method:
+        await message.answer("Способ оплаты не найден. Откройте /admin заново.")
+        await state.clear()
+        return
+
+    await state.clear()
+    await message.answer(
+        _render_payment_method_text(method),
+        reply_markup=admin_payment_method_actions_kb(method.id, method.is_active),
+        parse_mode="HTML"
+    )
+
